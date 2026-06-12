@@ -1,0 +1,6 @@
+# Demo project dependencies — deliberately a mix of pinned and unpinned.
+requests==2.31.0
+urllib3==2.2.1
+flask>=2.0            # unpinned: a range, not an exact version
+pyyaml==6.0.1
+leftpad-clone         # unpinned: no version at all (known-bad in the demo policy)

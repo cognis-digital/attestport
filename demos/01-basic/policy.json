@@ -1,0 +1,6 @@
+{
+  "banned_licenses": ["GPL-3.0", "AGPL-3.0", "SSPL-1.0"],
+  "banned_components": ["leftpad-clone", "left-pad"],
+  "require_pinned": true,
+  "require_attestation": false
+}
