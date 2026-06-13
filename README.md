@@ -12,6 +12,30 @@
 
 *Developer & Supply-Chain Security — knowing what you ship, and proving it, without phoning home.*
 
+## Usage — step by step
+
+1. **Install** from source (Python 3.9+):
+   ```bash
+   pip install .
+   ```
+2. **Generate** a CycloneDX-style SBOM for a project directory:
+   ```bash
+   attestport sbom ./myproject --out sbom.json
+   ```
+3. **Attest** the artifact, binding in the SBOM (SLSA/in-toto-style provenance):
+   ```bash
+   attestport attest ./dist --builder ci@example.com --sbom sbom.json --out attestation.json
+   ```
+4. **Verify** an artifact against its attestation:
+   ```bash
+   attestport verify ./dist attestation.json --format json
+   ```
+5. **Gate in CI** — policy gate over the project, failing on severity:
+   ```bash
+   attestport gate ./myproject --attestation attestation.json --format sarif --fail-on high --out gate.sarif
+   ```
+   Signing keys come from `--key`, the `ATTESTPORT_KEY` env var, or a demo key. Also: `attestport mcp`.
+
 ## Why
 
 Most supply-chain tooling assumes a network: a transparency log to talk to, a key service to fetch, a registry to query. In an air-gapped or high-assurance CI runner you have none of that. `attestport` does the whole loop **offline with nothing but the Python standard library** — no pip install, no daemon, no network:
