@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cognis-attestport"
-version = "0.1.0"
+version = "0.1.1"
 description = "Air-gap software supply-chain gate — SBOM (CycloneDX), SLSA/in-toto-style provenance + signature, CI policy gate"
 authors = [{name = "Cognis Digital", email = "suite@cognis.digital"}]
 license = {text = "LicenseRef-COCL-1.0"}
@@ -21,6 +21,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+connect = ["cognis-connect @ git+https://github.com/cognis-digital/cognis-connect.git"]
 dev = ["pytest>=8.0"]
 
 [project.urls]
@@ -28,6 +29,7 @@ Homepage = "https://cognis.digital"
 Repository = "https://github.com/cognis-digital/attestport"
 
 [project.scripts]
+"attestport-emit" = "attestport.connect:emit_main"
 attestport = "attestport.cli:main"
 
 [tool.hatch.build.targets.wheel]
