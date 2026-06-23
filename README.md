@@ -34,7 +34,12 @@
    ```bash
    attestport gate ./myproject --attestation attestation.json --format sarif --fail-on high --out gate.sarif
    ```
-   Signing keys come from `--key`, the `ATTESTPORT_KEY` env var, or a demo key. Also: `attestport mcp`.
+6. **Match components against known CVEs — fully offline:**
+   ```bash
+   attestport match ./myproject                       # human table
+   attestport gate ./myproject --vuln --fail-on high  # fold CVE findings into the gate
+   ```
+   Signing keys come from `--key`, the `ATTESTPORT_KEY` env var, or a demo key. Also: `attestport vulndb`, `attestport mcp`.
 
 ## Why
 
@@ -83,6 +88,12 @@ attestport verify demos/01-basic/demoproj att.json
 # 4. Gate a CI pipeline on a policy (exits non-zero on a violation)
 attestport gate demos/01-basic/demoproj --policy demos/01-basic/policy.json --fail-on high
 
+# 5. Match the project's components against the bundled offline CVE database
+attestport match demos/01-basic/demoproj
+
+# ...or fold component-CVE findings straight into the gate:
+attestport gate demos/01-basic/demoproj --vuln --fail-on high
+
 # expose the engine to agents over MCP (stdio):
 attestport mcp
 ```
@@ -94,7 +105,9 @@ attestport mcp
 | `sbom <dir>`      | Walk a project, detect dependencies from lockfiles, hash files, emit a CycloneDX-style SBOM. |
 | `attest <artifact>` | Build an in-toto `Statement` + SLSA-style provenance predicate (subject digest, builder, materials, bound SBOM digest) and attach a detached signature. |
 | `verify <artifact> <attestation>` | Recompute the subject digest, check the signature, optionally enforce a component policy. Non-zero on any mismatch. |
-| `gate <dir> --policy policy.json` | CI gate: fail on banned licenses, known-bad components, unpinned deps, or a missing/invalid attestation. `table` / `json` / `sarif` output + `--fail-on`. |
+| `gate <dir> --policy policy.json` | CI gate: fail on banned licenses, known-bad components, unpinned deps, or a missing/invalid attestation. Add `--vuln` to also match components against the bundled CVE DB. `table` / `json` / `sarif` output + `--fail-on`. |
+| `match <dir>` | Match the project's components against the bundled offline vulnerability DB (262k real OSV/GHSA records). `table` / `json`; `--fail-on-match` for CI. |
+| `vulndb {count,cve,package,search}` | Query the bundled offline vuln DB directly — e.g. `attestport vulndb cve CVE-2021-44228`. |
 | `mcp` | Run as a local MCP server (stdio JSON-RPC) exposing `sbom`, `verify`, `gate`. |
 
 ## Supported lockfiles
@@ -139,6 +152,116 @@ See [`demos/01-basic/SCENARIO.md`](demos/01-basic/SCENARIO.md) for the full sbom
 - **Table** (default) — human-readable terminal summary
 - **JSON** — machine-readable SBOM / gate findings for pipelines
 - **SARIF** — drops into GitHub code-scanning / IDE problem panes
+
+## Offline component → CVE matching (bundled vuln DB)
+
+`attestport` ships a consolidated, compressed **OSV/GHSA corpus** —
+`attestport/cognis_vulndb.jsonl.gz`, **~262,000 real vulnerability records**
+across PyPI, npm, Go, Maven, crates.io, RubyGems, and NuGet. The match stage
+takes the components your build *declares* and resolves them against that corpus
+**with the standard library and no network** — exactly what an air-gapped runner
+needs. Nothing here is fabricated: every finding is backed by a real record in
+the bundle.
+
+```bash
+# Look up the canonical log4shell advisory straight from the bundle:
+$ attestport vulndb cve CVE-2021-44228
+[
+  {
+    "id": "GHSA-jfh8-c2jp-5v3q",
+    "aliases": ["CVE-2021-44228"],
+    "ecosystem": "Maven",
+    "summary": "Remote code injection in Log4j",
+    "severity": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H/E:H",
+    "packages": ["org.apache.logging.log4j:log4j-core", "..."]
+  }
+]
+
+# Match a whole project's components (worked example, real output trimmed):
+$ attestport match demos/01-basic/demoproj
+ATTESTPORT vuln match — demos/01-basic/demoproj
+====================================================================
+urllib3@2.2.1 [pypi] — 34 vuln(s)
+    - GHSA-34jh-p97f-mpxf (CVE-2024-37891)
+        urllib3's Proxy-Authorization header isn't stripped on cross-origin redirect
+    - GHSA-48p4-8xcf-vxj5 (CVE-2025-50182)
+        urllib3 does not control redirects in browsers and Node.js
+requests@2.31.0 [pypi] — 13 vuln(s)
+    ...
+--------------------------------------------------------------------
+components=3 vulnerable=3 vulns=...
+```
+
+Other queries:
+
+```bash
+attestport vulndb count                                    # -> 262351
+attestport vulndb package lodash --ecosystem npm           # vulns for a package
+attestport vulndb search deserialization --limit 10        # summary substring search
+attestport match ./proj --format json --out cve.json       # machine-readable
+attestport gate ./proj --vuln --format sarif --out gate.sarif   # CVE findings as SARIF
+```
+
+Severity for each matched vuln is derived deterministically from the record's
+CVSS field and bucketed to `critical/high/medium/low/info`, so `--vuln` plays
+cleanly with `--fail-on`.
+
+## Edge / air-gap intel refresh
+
+The bundled DB is the **offline baseline** — the tool is fully useful the moment
+it's cloned, with no network. To keep it current on connected gear (and then
+sneakernet the refresh into a disconnected enclave), `attestport` includes a
+keyless feed catalog ([`attestport/data_feeds_2026.json`](attestport/data_feeds_2026.json))
+and an edge-deployable ingester ([`attestport/datafeeds.py`](attestport/datafeeds.py)):
+
+```bash
+# List catalogued real, mostly-keyless intel feeds (CISA KEV, EPSS, OSV, NVD, GHSA, ...)
+python -m attestport.datafeeds list --domain vuln
+
+# On a CONNECTED host: refresh + cache feeds, or bulk-harvest CVEs from NVD/GHSA
+python -m attestport.datafeeds update cisa-kev epss osv
+python -m attestport.datafeeds bulk nvd-cve --max 200000
+
+# Package the cache for transfer, then import it inside the air gap (no network):
+python -m attestport.datafeeds snapshot-export feeds.tar.gz
+#   --- carry feeds.tar.gz across the gap ---
+python -m attestport.datafeeds snapshot-import feeds.tar.gz
+python -m attestport.datafeeds get cisa-kev --offline       # serves the cache only
+```
+
+Design for the edge: standard library only (`urllib`), a disk cache with
+per-feed freshness metadata (`COGNIS_FEEDS_CACHE`), an `offline=True` mode that
+never touches the network, and tar snapshots for sneakernet. **Refresh is the
+only step that uses the network, it is explicit and operator-initiated, and it
+only ever fetches public advisory data — the tool itself never phones home and
+performs no active scanning.**
+
+## Language ports (Node / Go / Rust)
+
+The trust-critical primitives — deterministic SBOM hashing and signed
+provenance — are also implemented natively in **Node.js**, **Go**, and **Rust**
+under [`ports/`](ports/), each zero-dependency and air-gap-buildable. They share
+`attestport`'s canonical-JSON + HMAC-SHA256 contract, so an attestation signed by
+one verifies under any other on a shared key. CI
+([`.github/workflows/ports.yml`](.github/workflows/ports.yml)) builds and tests
+all three on every push and proves Python→Node cross-verification. See
+[`ports/README.md`](ports/README.md).
+
+```bash
+node ports/node/attestport.mjs sbom ./myproject
+cd ports/go   && go run . sbom ../../myproject
+cd ports/rust && cargo run -- sbom ../../myproject
+```
+
+## Scope, authorization & safety
+
+`attestport` is a **defensive, passive, offline** tool. It reads files you point
+it at, hashes them, and matches declared components against a bundled, real CVE
+corpus. It does **not** perform active or network scanning, it sends no exploit
+traffic, and it never contacts a target system. The only optional network use is
+the operator-initiated **intel refresh** above, which fetches public advisory
+feeds (NVD/OSV/GHSA/CISA KEV) and nothing else. Use it on code and artifacts you
+are authorized to inspect.
 
 ## Originality / clean-room
 

@@ -1,0 +1,14 @@
+[package]
+name = "attestport"
+version = "0.1.0"
+edition = "2021"
+description = "Air-gap supply-chain SBOM + provenance (Rust port of the Cognis attestport CLI)"
+license = "LicenseRef-COCL-1.0"
+
+# Standard library + tiny vendored SHA-256/HMAC implementations only (see
+# src/main.rs). No crates.io dependencies, so it builds offline / air-gapped.
+[dependencies]
+
+[[bin]]
+name = "attestport"
+path = "src/main.rs"

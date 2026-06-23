@@ -27,6 +27,16 @@ from attestport.core import (
     load_policy,
     to_sarif,
 )
+from attestport.vulndb_local import VulnDB
+from attestport.vulnmatch import (
+    normalize_ecosystem,
+    match_component,
+    match_components,
+    match_sbom,
+    lookup_cve,
+    vuln_findings,
+    severity_bucket,
+)
 
 __version__ = TOOL_VERSION
 
@@ -54,4 +64,12 @@ __all__ = [
     "gate",
     "load_policy",
     "to_sarif",
+    "VulnDB",
+    "normalize_ecosystem",
+    "match_component",
+    "match_components",
+    "match_sbom",
+    "lookup_cve",
+    "vuln_findings",
+    "severity_bucket",
 ]

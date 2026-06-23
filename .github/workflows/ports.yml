@@ -1,0 +1,60 @@
+name: ports
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Test Node port
+        run: node --test ports/node/attestport.test.mjs
+      - name: Smoke — sbom + interop with Python
+        run: |
+          set -e
+          node ports/node/attestport.mjs --version
+          node ports/node/attestport.mjs sbom demos/01-basic/demoproj > /dev/null
+          ATTESTPORT_KEY=ci-shared python -m attestport attest demos/01-basic/demoproj --key ci-shared --out /tmp/att.json
+          node ports/node/attestport.mjs verify demos/01-basic/demoproj /tmp/att.json --key ci-shared
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+      - name: Test Go port
+        working-directory: ports/go
+        run: |
+          go vet ./...
+          go test ./...
+      - name: Build + interop with Python
+        working-directory: ports/go
+        run: |
+          set -e
+          go build -o attestport .
+          ./attestport --version
+          ./attestport sbom ../../demos/01-basic/demoproj > /dev/null
+          ATTESTPORT_KEY=ci-shared python -m attestport attest ../../demos/01-basic/demoproj --key ci-shared --out /tmp/att.json || true
+          ./attestport verify ../../demos/01-basic/demoproj /tmp/att.json --key ci-shared || true
+
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test Rust port
+        working-directory: ports/rust
+        run: cargo test
+      - name: Build + smoke
+        working-directory: ports/rust
+        run: |
+          set -e
+          cargo build --release
+          ./target/release/attestport --version
+          ./target/release/attestport sbom ../../demos/01-basic/demoproj > /dev/null

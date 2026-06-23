@@ -11,9 +11,11 @@ from typing import List, Optional
 from attestport import TOOL_NAME, TOOL_VERSION
 from attestport.core import (
     AttestError,
+    Finding,
     GateReport,
     SEVERITY_ORDER,
     attest,
+    detect_components,
     gate,
     generate_sbom,
     load_policy,
@@ -189,6 +191,19 @@ def _run_gate(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    # Optional component-CVE stage: enrich the gate with offline matches from
+    # the bundled vulnerability DB. Purely local, no network.
+    if getattr(args, "vuln", False):
+        try:
+            from attestport.vulnmatch import vuln_findings
+            comps = [c.to_cyclonedx() for c in detect_components(args.directory)]
+            extra = vuln_findings(comps)
+            report.findings.extend(extra)
+            report.findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
+        except (OSError, AttestError) as exc:
+            print(f"error: vuln matching failed: {exc}", file=sys.stderr)
+            return 2
+
     if args.format == "json":
         _emit(json.dumps(report.to_dict(), indent=2), args.out)
     elif args.format == "sarif":
@@ -197,6 +212,81 @@ def _run_gate(args: argparse.Namespace) -> int:
         _emit(_render_gate_table(report), args.out)
 
     return 1 if _fails_gate(report, args.fail_on) else 0
+
+
+# --------------------------------------------------------------------------- #
+# match — offline SBOM-component CVE matching against the bundled vuln DB
+# --------------------------------------------------------------------------- #
+def _run_match(args: argparse.Namespace) -> int:
+    from attestport.vulnmatch import match_components
+
+    try:
+        comps = [c.to_cyclonedx() for c in detect_components(args.directory)]
+    except (OSError, AttestError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    matches = match_components(comps)
+    total = sum(m["vuln_count"] for m in matches)
+
+    if args.format == "json":
+        _emit(json.dumps({
+            "source": args.directory,
+            "components_scanned": len(comps),
+            "vulnerable_components": len(matches),
+            "total_vulns": total,
+            "matches": matches,
+        }, indent=2), args.out)
+    else:
+        lines: List[str] = [f"ATTESTPORT vuln match — {args.directory}",
+                            "=" * 68]
+        if not matches:
+            lines.append(f"No known vulnerabilities for {len(comps)} component(s) "
+                         f"in the bundled DB.")
+        else:
+            for m in matches:
+                lines.append(f"{m['component']}@{m['version']} "
+                             f"[{m['ecosystem'] or '?'}] — {m['vuln_count']} vuln(s)")
+                for v in m["vulns"][:args.limit]:
+                    aliases = ", ".join(v["aliases"][:3]) or v["id"]
+                    lines.append(f"    - {v['id']} ({aliases})")
+                    if v["summary"]:
+                        lines.append(f"        {v['summary'][:96]}")
+        lines.append("-" * 68)
+        lines.append(f"components={len(comps)} vulnerable={len(matches)} "
+                     f"vulns={total}")
+        _emit("\n".join(lines), args.out)
+    return 1 if (matches and args.fail_on_match) else 0
+
+
+# --------------------------------------------------------------------------- #
+# vulndb — query the bundled offline vulnerability database directly
+# --------------------------------------------------------------------------- #
+def _run_vulndb(args: argparse.Namespace) -> int:
+    from attestport.vulndb_local import VulnDB
+    from attestport.vulnmatch import lookup_cve, match_component
+
+    db = VulnDB()
+    if args.vulndb_command == "count":
+        print(db.count())
+        return 0
+    if args.vulndb_command == "cve":
+        recs = lookup_cve(args.id, db=db)
+        _emit(json.dumps(recs, indent=2), args.out)
+        return 0 if recs else 1
+    if args.vulndb_command == "package":
+        recs = match_component(args.name, ecosystem=args.ecosystem, db=db)
+        _emit(json.dumps(recs, indent=2), args.out)
+        return 0 if recs else 1
+    if args.vulndb_command == "search":
+        recs = db.search(args.text, limit=args.limit)
+        brief = [{"id": r.get("id"), "ecosystem": r.get("ecosystem"),
+                  "summary": r.get("summary"), "packages": r.get("packages")}
+                 for r in recs]
+        _emit(json.dumps(brief, indent=2), args.out)
+        return 0 if brief else 1
+    print("usage: attestport vulndb {count,cve,package,search}", file=sys.stderr)
+    return 2
 
 
 # --------------------------------------------------------------------------- #
@@ -253,6 +343,30 @@ def _build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--out", help="Write output to this file.")
     gt.add_argument("--fail-on", choices=tuple(SEVERITY_ORDER), default=None,
                     help="Exit non-zero if a finding at/above this severity exists.")
+    gt.add_argument("--vuln", action="store_true",
+                    help="Also match components against the bundled offline "
+                         "vulnerability DB (262k real OSV/GHSA records).")
+
+    mt = sub.add_parser("match", help="Match a project's components against the "
+                                      "bundled offline vulnerability DB.")
+    mt.add_argument("directory", help="Project directory to inventory + match.")
+    mt.add_argument("--format", choices=("table", "json"), default="table")
+    mt.add_argument("--out", help="Write output to this file.")
+    mt.add_argument("--limit", type=int, default=10,
+                    help="Max vulns to print per component (table mode).")
+    mt.add_argument("--fail-on-match", action="store_true",
+                    help="Exit non-zero if any component has a known vuln.")
+
+    vd = sub.add_parser("vulndb", help="Query the bundled offline vulnerability DB.")
+    vsub = vd.add_subparsers(dest="vulndb_command")
+    vsub.add_parser("count", help="Print the number of records in the DB.")
+    vc = vsub.add_parser("cve", help="Look up a CVE/GHSA id.")
+    vc.add_argument("id"); vc.add_argument("--out")
+    vp = vsub.add_parser("package", help="Look up vulns for a package name.")
+    vp.add_argument("name"); vp.add_argument("--ecosystem"); vp.add_argument("--out")
+    vs = vsub.add_parser("search", help="Substring search over vuln summaries.")
+    vs.add_argument("text"); vs.add_argument("--limit", type=int, default=25)
+    vs.add_argument("--out")
 
     sub.add_parser("mcp", help="Run as an MCP server (stdio JSON-RPC).")
     return p
@@ -269,6 +383,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return _run_verify(args)
     if args.command == "gate":
         return _run_gate(args)
+    if args.command == "match":
+        return _run_match(args)
+    if args.command == "vulndb":
+        return _run_vulndb(args)
     if args.command == "mcp":
         return _run_mcp()
     parser.print_help(sys.stderr)

@@ -35,5 +35,9 @@ attestport = "attestport.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["attestport"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"attestport/cognis_vulndb.jsonl.gz" = "attestport/cognis_vulndb.jsonl.gz"
+"attestport/data_feeds_2026.json" = "attestport/data_feeds_2026.json"
+
 [tool.hatch.metadata]
 allow-direct-references = true
