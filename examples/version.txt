@@ -1,0 +1,3 @@
+$ attestport-emit --version
+
+attestport 0.1.0

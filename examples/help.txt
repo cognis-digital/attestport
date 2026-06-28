@@ -1,0 +1,23 @@
+$ attestport-emit --help
+
+usage: attestport [-h] [--version]
+                  {sbom,attest,verify,gate,match,vulndb,mcp} ...
+
+Air-gap software supply-chain gate — SBOM (CycloneDX), SLSA/in-toto-style
+provenance + signature, CI policy gate.
+
+positional arguments:
+  {sbom,attest,verify,gate,match,vulndb,mcp}
+    sbom                Generate a CycloneDX-style SBOM for a project.
+    attest              Produce a signed SLSA/in-toto-style provenance
+                        attestation for an artifact.
+    verify              Verify an artifact against its attestation.
+    gate                CI policy gate over a project directory.
+    match               Match a project's components against the bundled
+                        offline vulnerability DB.
+    vulndb              Query the bundled offline vulnerability DB.
+    mcp                 Run as an MCP server (stdio JSON-RPC).
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit

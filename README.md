@@ -12,6 +12,69 @@
 
 *Developer & Supply-Chain Security — knowing what you ship, and proving it, without phoning home.*
 
+
+<!-- cognis:example:start -->
+## 🔎 Example output
+
+Real, reproducible output from the tool — runs offline:
+
+```console
+$ attestport-emit --version
+attestport 0.1.0
+```
+
+```console
+$ attestport-emit --help
+usage: attestport [-h] [--version]
+                  {sbom,attest,verify,gate,match,vulndb,mcp} ...
+
+Air-gap software supply-chain gate — SBOM (CycloneDX), SLSA/in-toto-style
+provenance + signature, CI policy gate.
+
+positional arguments:
+  {sbom,attest,verify,gate,match,vulndb,mcp}
+    sbom                Generate a CycloneDX-style SBOM for a project.
+    attest              Produce a signed SLSA/in-toto-style provenance
+                        attestation for an artifact.
+    verify              Verify an artifact against its attestation.
+    gate                CI policy gate over a project directory.
+    match               Match a project's components against the bundled
+                        offline vulnerability DB.
+    vulndb              Query the bundled offline vulnerability DB.
+    mcp                 Run as an MCP server (stdio JSON-RPC).
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
+```
+
+> Blocks above are real `attestport` output — reproduce them from a clone.
+
+**Sample result format** _(illustrative values — run on your own data for real findings):_
+
+```
+{
+"findings": [
+    {
+        "id": "123456",
+        "title": "Suspicious Activity",
+        "description": "Potential malicious activity detected",
+        "created_by": "John Doe",
+        "created_at": "2023-02-20T14:30:00Z"
+    },
+    {
+        "id": "789012",
+        "title": "Malware Detection",
+        "description": "Malicious software identified",
+        "created_by": "Jane Smith",
+        "created_at": "2023-02-21T10:45:00Z"
+    }
+]
+}
+```
+
+<!-- cognis:example:end -->
+
 ## Usage — step by step
 
 1. **Install** from source (Python 3.9+):
